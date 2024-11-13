@@ -71,7 +71,16 @@ int main(int argc, char *argv[]) {
         struct sockaddr_in addr;
         addr.sin_family = AF_INET;
         addr.sin_port = htons(port);
-        inet_aton(ip, &addr.sin_addr);
+        
+        if (inet_aton(ip, &addr.sin_addr) == 0){
+            struct hostent *he = gethostbyname(ip);
+            if (he == NULL) {
+                printf("Can not reslove domain: %s\n", ip);
+                continue;
+            }
+            addr.sin_addr = *((struct in_addr *)he->h_addr);
+            printf("domain %s IP Address: %s\n", ip, inet_ntoa(addr.sin_addr));
+        }
 
         // print the ip and port
         printf("Trying to connect to %s:%d\n", ip, port);
