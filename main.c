@@ -20,13 +20,13 @@ int main(int argc, char *argv[]) {
     char **program_args = NULL;
     int program_args_count = 0;
 
-    char *timeout = NULL;
-    char *timeout_mil = NULL;
+    char *timeout = NULL;      // -T
+    char *timeout_mil = NULL;  // -M
 
     int max_retries = 3;
     int thread_sleep_count = 3;
-    int retry_count = 0;
-    bool connected = false;
+
+    bool any_connected = false;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-P") == 0) {
@@ -45,22 +45,25 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(argv[i], "-T") == 0 && i + 1 < argc) {
             timeout = argv[i + 1];
             max_retries = atoi(timeout);
-        } else if (strcmp(argv[i], "-M") == 0 && i + 1 <argc){
+        } else if (strcmp(argv[i], "-M") == 0 && i + 1 < argc) {
             timeout_mil = argv[i + 1];
             thread_sleep_count = atoi(timeout_mil);
         }
     }
 
+    // check -P -E should not be null
     if (program == NULL || ip_ports == NULL) {
-        printf("Invalid arguments\n");
+        printf("Invalid arguments: Missing -P or -E.\n");
         return 1;
     }
 
     for (int i = 0; i < ip_ports_count; i++) {
+        int retry_count = 0;
+
         char *ip_port = ip_ports[i];
         char *delimiter_pos = strchr(ip_port, ':');
         if (delimiter_pos == NULL) {
-            printf("Invalid IP:port format\n");
+            printf("Invalid IP:port format: %s\n", ip_port);
             return 1;
         }
 
@@ -69,40 +72,59 @@ int main(int argc, char *argv[]) {
         int port = atoi(delimiter_pos + 1);
 
         int sock = socket(AF_INET, SOCK_STREAM, 0);
+        if (sock < 0) {
+            perror("socket creation failed");
+            return 1;
+        }
+
         struct sockaddr_in addr;
         addr.sin_family = AF_INET;
         addr.sin_port = htons(port);
-        
-        if (inet_aton(ip, &addr.sin_addr) == 0){
+
+        if (inet_aton(ip, &addr.sin_addr) == 0) {
             struct hostent *he = gethostbyname(ip);
             if (he == NULL) {
-                printf("Can not reslove domain: %s\n", ip);
-                continue;
+                printf("Cannot resolve domain: %s\n", ip);
+                close(sock);
+                continue; // try next IP:Port
             }
             addr.sin_addr = *((struct in_addr *)he->h_addr);
-            printf("domain %s IP Address: %s\n", ip, inet_ntoa(addr.sin_addr));
+            printf("Resolved domain %s, IP Address: %s\n", ip, inet_ntoa(addr.sin_addr));
         }
 
-        // print the ip and port
         printf("Trying to connect to %s:%d\n", ip, port);
 
+        bool connected = false;
         while (retry_count < max_retries) {
             if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
+                printf("Connection to %s:%d succeeded.\n", ip, port);
                 connected = true;
+                any_connected = true;
                 break;
             } else {
-                retry_count++;
-                connected = false;
                 perror("Failed to connect");
-                printf("Retrying in 3 seconds...\n");
-                sleep(thread_sleep_count);
+                retry_count++;
+                if (retry_count < max_retries) {
+                    printf("Retrying in %d seconds...\n", thread_sleep_count);
+                    sleep(thread_sleep_count);
+                }
             }
         }
+
         close(sock);
+        
+        if (connected) {
+            // break;
+        }
+    }
+    
+    if (any_connected) {
+        execvp(program, program_args);
+        perror("execvp failed");
+        return 1;
+    } else {
+        printf("All connections failed. Program will not run.\n");
     }
 
-    if (connected) {
-        execvp(program, program_args);
-    }
     return 0;
 }
